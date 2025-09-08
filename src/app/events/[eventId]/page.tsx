@@ -10,12 +10,16 @@ type TournamentEvent = {
 };
 
 // Full type for a hand, matching the backend
+type GuiData = { [key: string]: any }; // Keeping it simple on the frontend for now
+
 type Hand = {
   id: string;
   eventId: string;
   filename: string;
   path: string;
   status: 'uploaded' | 'processing' | 'needs_review' | 'completed';
+  textHistory?: string;
+  guiData?: GuiData;
 };
 
 export default function EventDetailPage() {
@@ -23,6 +27,7 @@ export default function EventDetailPage() {
   const [hands, setHands] = useState<Hand[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [analyzingHandId, setAnalyzingHandId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const params = useParams();
   const eventId = params.eventId as string;
@@ -89,6 +94,27 @@ export default function EventDetailPage() {
     }
   };
 
+  const handleAnalyze = async (handId: string) => {
+    setAnalyzingHandId(handId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/hands/${handId}/analyze`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        throw new Error('Analysis failed');
+      }
+      const updatedHand = await res.json();
+      setHands((prevHands) =>
+        prevHands.map((h) => (h.id === handId ? updatedHand : h))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred during analysis');
+    } finally {
+      setAnalyzingHandId(null);
+    }
+  };
+
   if (isLoading) {
     return <main className="container mx-auto px-4 py-8">Loading...</main>;
   }
@@ -127,16 +153,44 @@ export default function EventDetailPage() {
         <h2 className="text-2xl font-semibold mb-4">Uploaded Hands</h2>
         {hands.length > 0 ? (
           <ul className="space-y-4">
-            {hands.map((hand) => (
-              <li key={hand.id}>
-                <Link href={`/events/${eventId}/hands/${hand.id}`} className="block p-4 bg-white shadow rounded-lg hover:bg-gray-50 transition-colors">
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">{hand.filename}</span>
-                    <span className="text-sm capitalize px-2 py-1 bg-gray-200 rounded-full">{hand.status}</span>
+            {hands.map((hand) => {
+              const isAnalyzing = analyzingHandId === hand.id;
+              const content = (
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">{hand.filename}</span>
+                  <div className="flex items-center gap-4">
+                    <span className={`text-sm capitalize px-2 py-1 rounded-full ${hand.status === 'needs_review' ? 'bg-yellow-200 text-yellow-800' : 'bg-gray-200'}`}>
+                      {isAnalyzing ? 'Analyzing...' : hand.status.replace('_', ' ')}
+                    </span>
+                    {hand.status === 'uploaded' && !isAnalyzing && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleAnalyze(hand.id);
+                        }}
+                        className="text-sm bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+                      >
+                        Analyze
+                      </button>
+                    )}
                   </div>
-                </Link>
-              </li>
-            ))}
+                </div>
+              );
+
+              return (
+                <li key={hand.id}>
+                  {hand.status !== 'uploaded' ? (
+                    <Link href={`/events/${eventId}/hands/${hand.id}`} className="block p-4 bg-white shadow rounded-lg hover:bg-gray-50 transition-colors">
+                      {content}
+                    </Link>
+                  ) : (
+                    <div className="p-4 bg-white shadow rounded-lg">
+                      {content}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p>No hands uploaded for this event yet.</p>
