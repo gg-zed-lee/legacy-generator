@@ -7,6 +7,7 @@ import { useParams, useRouter } from 'next/navigation';
 type GuiData = {
   tournamentInfo: { name: string; blinds: string; ante: number };
   players: { seat: number; name: string; stack: number; cards: string[] }[];
+  actions: { street: string; player: string; action: string; amount?: number }[];
   board: string[];
   result: { winner: string; pot: number; winningHand: string };
 };
@@ -146,6 +147,16 @@ function GuiDisplay({ data }: { data: GuiData }) {
         <h3 className="font-bold">{data.tournamentInfo.name}</h3>
         <p>Blinds: {data.tournamentInfo.blinds} (Ante: {data.tournamentInfo.ante})</p>
         <p>Pot: {data.result.pot}</p>
+      </div>
+      <div>
+        <h3 className="font-bold">Actions</h3>
+        <ul className="space-y-1">
+          {data.actions.map((action, index) => (
+            <li key={index} className="font-mono text-xs">
+              <span className="font-semibold">{action.street}:</span> {action.player} {action.action} {action.amount || ''}
+            </li>
+          ))}
+        </ul>
       </div>
       <div>
         <h3 className="font-bold">Board</h3>

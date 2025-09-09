@@ -1,21 +1,23 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 
-// This is a simplified version of the JSON data structure from the TRD
-// In a real scenario, this would be much more detailed.
-type GuiData = {
-  handId: string;
-  tournamentInfo: {
-    name: string;
-    blinds: string;
-    ante: number;
-  };
+// This type matches the output of our refined Python parser
+type ParsedData = {
+  tournamentInfo: { name: string; blinds: string; ante: number };
   players: { seat: number; name: string; stack: number; cards: string[] }[];
   actions: { street: string; player: string; action: string; amount?: number }[];
   board: string[];
   result: { winner: string; pot: number; winningHand: string };
 };
+
+type PythonOutput = {
+  raw_text: string;
+  parsed_data: ParsedData;
+}
+
+type GuiData = ParsedData;
 
 type Hand = {
   id: string;
@@ -46,61 +48,7 @@ async function saveHands(hands: Hand[]): Promise<void> {
   await fs.writeFile(handsDbPath, JSON.stringify(hands, null, 2), 'utf-8');
 }
 
-// Function to generate mock data based on the TRD examples
-function generateMockData(handId: string): { textHistory: string; guiData: GuiData } {
-  const guiData: GuiData = {
-    handId: handId,
-    tournamentInfo: {
-      name: 'Mock Sunday Main Event',
-      blinds: '1000/2000',
-      ante: 200,
-    },
-    players: [
-      { seat: 1, name: 'PlayerA', stack: 100000, cards: ['As', 'Kd'] },
-      { seat: 5, name: 'PlayerB', stack: 85000, cards: ['7h', '7s'] },
-    ],
-    actions: [
-      { street: 'preflop', player: 'PlayerA', action: 'raise', amount: 4000 },
-      { street: 'preflop', player: 'PlayerB', action: 'call', amount: 4000 },
-      { street: 'flop', player: 'PlayerA', action: 'bet', amount: 6000 },
-      { street: 'flop', player: 'PlayerB', action: 'call', amount: 6000 },
-      { street: 'turn', player: 'PlayerA', action: 'check' },
-      { street: 'turn', player: 'PlayerB', action: 'check' },
-      { street: 'river', player: 'PlayerA', action: 'bet', amount: 15000 },
-      { street: 'river', player: 'PlayerB', action: 'fold' },
-    ],
-    board: ['2c', '5h', '8d', 'Jc', '4s'],
-    result: {
-      winner: 'PlayerA',
-      pot: 21200,
-      winningHand: 'High Card: Ace',
-    },
-  };
-
-  const textHistory = `***** Hand History for Game #${handId} *****
-Tournament: Mock Sunday Main Event
-Blinds: 1000/2000 Ante 200
-Table: Final Table (9-max)
-Seat 1: PlayerA (50 BB)
-Seat 5: PlayerB (42.5 BB)
-** PRE-FLOP **
-PlayerA (UTG) raises to 4000.
-PlayerB (CO) calls 4000.
-** FLOP ** [2c 5h 8d]
-PlayerA bets 6000.
-PlayerB calls 6000.
-** TURN ** [2c 5h 8d] [Jc]
-PlayerA checks.
-PlayerB checks.
-** RIVER ** [2c 5h 8d Jc] [4s]
-PlayerA bets 15000.
-PlayerB folds.
-** SUMMARY **
-Total pot: 21200 | Rake: 0
-Winner: PlayerA wins 21200`;
-
-  return { textHistory, guiData };
-}
+// (The mock data generation function is removed as it's being replaced)
 
 
 type PostParams = {
@@ -108,6 +56,39 @@ type PostParams = {
     handId: string;
   };
 };
+
+async function runPythonScript(videoPath: string): Promise<PythonOutput> {
+  return new Promise((resolve, reject) => {
+    const pythonProcess = spawn('python3', ['scripts/process_video.py', videoPath]);
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`Python script exited with code ${code}`);
+        console.error(stderr);
+        reject(new Error(`Analysis script failed: ${stderr}`));
+      } else {
+        try {
+          const result = JSON.parse(stdout);
+          resolve(result);
+        } catch (e) {
+          console.error("Failed to parse Python script output as JSON:", stdout);
+          reject(new Error("Failed to parse Python script output."));
+        }
+      }
+    });
+  });
+}
 
 export async function POST(request: Request, { params }: PostParams) {
   const { handId } = params;
@@ -119,16 +100,23 @@ export async function POST(request: Request, { params }: PostParams) {
       return NextResponse.json({ message: 'Hand not found' }, { status: 404 });
     }
 
-    // Simulate a delay for AI processing
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const hand = allHands[handIndex];
 
-    const { textHistory, guiData } = generateMockData(handId);
+    // Convert URL path to filesystem path
+    // e.g., /uploads/event-id/video.mp4 -> public/uploads/event-id/video.mp4
+    const videoPath = path.join(process.cwd(), 'public', hand.path);
+
+    // Mark hand as 'processing'
+    hand.status = 'processing';
+    await saveHands(allHands);
+
+    const analysisResult = await runPythonScript(videoPath);
 
     const updatedHand = {
-      ...allHands[handIndex],
+      ...hand,
       status: 'needs_review' as const,
-      textHistory,
-      guiData,
+      textHistory: analysisResult.raw_text,
+      guiData: analysisResult.parsed_data,
     };
 
     allHands[handIndex] = updatedHand;
