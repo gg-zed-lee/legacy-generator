@@ -1,44 +1,30 @@
 import { NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { prisma } from '@/lib/prisma';
 
-type Hand = {
-  id: string;
-  eventId: string;
-  filename: string;
-  path: string;
-  status: 'uploaded' | 'processing' | 'needs_review' | 'completed';
-};
+// NOTE: This code is written assuming a functional Prisma Client.
+// It will not run in the current sandbox environment due to `prisma migrate` failures.
 
-const handsDbPath = path.join(process.cwd(), 'data', 'hands.db.json');
-
-async function getHands(): Promise<Hand[]> {
-  try {
-    const data = await fs.readFile(handsDbPath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-}
-
-type GetParams = {
+type RouteParams = {
   params: {
     eventId: string;
   };
 };
 
-export async function GET(request: Request, { params }: GetParams) {
+export async function GET(request: Request, { params }: RouteParams) {
   const { eventId } = params;
   try {
-    const allHands = await getHands();
-    const eventHands = allHands.filter((hand) => hand.eventId === eventId);
+    const eventHands = await prisma.hand.findMany({
+      where: {
+        eventId: eventId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
 
     return NextResponse.json({ hands: eventHands });
   } catch (error) {
-    console.error('Failed to get hands:', error);
+    console.error(`Failed to get hands for event ${eventId}:`, error);
     return NextResponse.json({ message: 'Failed to read hands data' }, { status: 500 });
   }
 }

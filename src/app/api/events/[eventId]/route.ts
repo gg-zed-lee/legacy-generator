@@ -1,37 +1,23 @@
 import { NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { prisma } from '@/lib/prisma';
 
-type TournamentEvent = {
-  id: string;
-  name: string;
-};
+// NOTE: This code is written assuming a functional Prisma Client.
+// It will not run in the current sandbox environment due to `prisma migrate` failures.
 
-const dbPath = path.join(process.cwd(), 'data', 'events.db.json');
-
-async function getEvents(): Promise<TournamentEvent[]> {
-  try {
-    const data = await fs.readFile(dbPath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-}
-
-type GetParams = {
+type RouteParams = {
   params: {
     eventId: string;
   };
 };
 
-export async function GET(request: Request, { params }: GetParams) {
+export async function GET(request: Request, { params }: RouteParams) {
   const { eventId } = params;
   try {
-    const events = await getEvents();
-    const event = events.find((e) => e.id === eventId);
+    const event = await prisma.event.findUnique({
+      where: {
+        id: eventId,
+      },
+    });
 
     if (!event) {
       return NextResponse.json({ message: 'Event not found' }, { status: 404 });
@@ -39,6 +25,7 @@ export async function GET(request: Request, { params }: GetParams) {
 
     return NextResponse.json(event);
   } catch (error) {
+    console.error(`Failed to fetch event ${eventId}:`, error);
     return NextResponse.json({ message: 'Failed to read event data' }, { status: 500 });
   }
 }

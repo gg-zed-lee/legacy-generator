@@ -120,7 +120,7 @@ export default function HandReviewPage() {
         <div className="col-span-1 row-span-1 bg-white shadow rounded-lg p-4 flex flex-col">
           <h2 className="text-xl font-semibold mb-2 flex-shrink-0">Visual Replay (GUI)</h2>
           <div className="flex-grow bg-gray-50 rounded p-2 overflow-y-auto">
-            {hand.guiData ? <GuiDisplay data={hand.guiData} /> : <p className="text-gray-500">No GUI data available.</p>}
+            {hand.guiData && hand.guiData.actions ? <HandReplayer data={hand.guiData} /> : <p className="text-gray-500">No GUI data available for replay.</p>}
           </div>
         </div>
 
@@ -140,51 +140,78 @@ export default function HandReviewPage() {
   );
 }
 
-function GuiDisplay({ data }: { data: GuiData }) {
+function HandReplayer({ data }: { data: GuiData }) {
+  const [actionIndex, setActionIndex] = useState(0);
+
+  // Derive the game state based on actions up to the current index
+  const currentActions = data.actions.slice(0, actionIndex);
+
+  let pot = 0;
+  const playerStacks = Object.fromEntries(data.players.map(p => [p.name, p.stack]));
+
+  currentActions.forEach(action => {
+    if (action.action === 'bet' || action.action === 'raise' || action.action === 'call') {
+      const amount = action.amount || 0;
+      pot += amount;
+      playerStacks[action.player] -= amount;
+    }
+  });
+
+  const getBoardForStreet = () => {
+    const street = actionIndex > 0 ? data.actions[actionIndex - 1].street : 'preflop';
+    if (street === 'flop') return data.board.slice(0, 3);
+    if (street === 'turn') return data.board.slice(0, 4);
+    if (street === 'river') return data.board;
+    return [];
+  };
+
+  const currentBoard = getBoardForStreet();
+
   return (
-    <div className="space-y-4 text-sm">
-      <div>
-        <h3 className="font-bold">{data.tournamentInfo.name}</h3>
-        <p>Blinds: {data.tournamentInfo.blinds} (Ante: {data.tournamentInfo.ante})</p>
-        <p>Pot: {data.result.pot}</p>
-      </div>
-      <div>
-        <h3 className="font-bold">Actions</h3>
-        <ul className="space-y-1">
-          {data.actions.map((action, index) => (
-            <li key={index} className="font-mono text-xs">
-              <span className="font-semibold">{action.street}:</span> {action.player} {action.action} {action.amount || ''}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div>
-        <h3 className="font-bold">Board</h3>
-        <div className="flex space-x-2">
-          {data.board.map(card => (
-            <span key={card} className="px-2 py-1 bg-white border rounded shadow-sm">{card}</span>
-          ))}
+    <div className="space-y-4 text-sm flex flex-col h-full">
+      <div className="flex-grow space-y-4">
+        <div>
+          <h3 className="font-bold">{data.tournamentInfo.name}</h3>
+          <p>Pot: {pot.toLocaleString()}</p>
+        </div>
+        <div>
+          <h3 className="font-bold">Board</h3>
+          <div className="flex space-x-2">
+            {currentBoard.map(card => (
+              <span key={card} className="px-2 py-1 bg-white border rounded shadow-sm">{card}</span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <h3 className="font-bold">Players</h3>
+          <ul className="space-y-2">
+            {data.players.map(player => (
+              <li key={player.seat} className="flex justify-between">
+                <span>{player.name} ({playerStacks[player.name].toLocaleString()})</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
-      <div>
-        <h3 className="font-bold">Players</h3>
-        <ul className="space-y-2">
-          {data.players.map(player => (
-            <li key={player.seat} className="flex justify-between">
-              <span>{player.name} (Seat {player.seat})</span>
-              <div className="flex space-x-1">
-                {player.cards.map(card => (
-                  <span key={card} className="px-2 py-1 bg-white border rounded shadow-sm">{card}</span>
-                ))}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-       <div>
-        <h3 className="font-bold">Winner</h3>
-        <p>{data.result.winner} with {data.result.winningHand}</p>
+      <div className="flex-shrink-0 flex justify-between items-center pt-2 border-t">
+        <button
+          onClick={() => setActionIndex(i => Math.max(0, i - 1))}
+          disabled={actionIndex === 0}
+          className="px-4 py-1 bg-gray-200 rounded disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <span className="text-xs font-mono">
+          {actionIndex > 0 ? `${data.actions[actionIndex-1].player} ${data.actions[actionIndex-1].action} ${data.actions[actionIndex-1].amount || ''}` : "Start of Hand"}
+        </span>
+        <button
+          onClick={() => setActionIndex(i => Math.min(data.actions.length, i + 1))}
+          disabled={actionIndex === data.actions.length}
+          className="px-4 py-1 bg-gray-200 rounded disabled:opacity-50"
+        >
+          Next
+        </button>
       </div>
     </div>
-  )
+  );
 }

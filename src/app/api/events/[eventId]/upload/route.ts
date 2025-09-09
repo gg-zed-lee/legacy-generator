@@ -1,43 +1,20 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { prisma } from '@/lib/prisma';
 
-type Hand = {
-  id: string;
-  eventId: string;
-  filename: string;
-  path: string;
-  status: 'uploaded' | 'processing' | 'needs_review' | 'completed';
-};
+// NOTE: This code is written assuming a functional Prisma Client.
+// It will not run in the current sandbox environment due to `prisma migrate` failures.
 
-const handsDbPath = path.join(process.cwd(), 'data', 'hands.db.json');
 const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
 
-async function getHands(): Promise<Hand[]> {
-  try {
-    const data = await fs.readFile(handsDbPath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-}
-
-async function saveHands(hands: Hand[]): Promise<void> {
-  await fs.mkdir(path.dirname(handsDbPath), { recursive: true });
-  await fs.writeFile(handsDbPath, JSON.stringify(hands, null, 2), 'utf-8');
-}
-
-type PostParams = {
+type RouteParams = {
   params: {
     eventId: string;
   };
 };
 
-export async function POST(request: Request, { params }: PostParams) {
+export async function POST(request: Request, { params }: RouteParams) {
   const { eventId } = params;
   try {
     const formData = await request.formData();
@@ -62,17 +39,15 @@ export async function POST(request: Request, { params }: PostParams) {
     const buffer = Buffer.from(await file.arrayBuffer());
     await fs.writeFile(filePath, buffer);
 
-    // Save hand metadata
-    const hands = await getHands();
-    const newHand: Hand = {
-      id: randomUUID(),
-      eventId,
-      filename: safeFilename,
-      path: fileUrl,
-      status: 'uploaded',
-    };
-    hands.push(newHand);
-    await saveHands(hands);
+    // Save hand metadata to the database
+    const newHand = await prisma.hand.create({
+      data: {
+        eventId: eventId,
+        filename: safeFilename,
+        path: fileUrl,
+        status: 'UPLOADED',
+      },
+    });
 
     return NextResponse.json(newHand, { status: 201 });
   } catch (error) {
